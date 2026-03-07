@@ -1,5 +1,6 @@
 #!/bin/zsh
 
+# Определение пути к скрипту
 if [[ -n "$ZSH_VERSION" ]]; then
     SCRIPT_SOURCE="${ZSH_ARGZERO:-${(%):-%N}}"
     SELF_PATH=$(dirname "$SCRIPT_SOURCE")
@@ -22,20 +23,25 @@ if [[ ! -f "$IMG" ]]; then
     exit 1
 fi
 
+# Очистка экрана
 printf "\033[H\033[2J\033[3J"
 
+# Настройки
 IMG_COLS=45
 IMG_ROWS=18
 GAP=4
 TEXT_COL=$((IMG_COLS + GAP))
 BOTTOM_GAP=3
 
+# Отрисовка картинки
 kitten icat --clear
 kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$IMG"
 
+# Цвета
 c="\e[1;35m"
 r="\e[0m"
 
+# Позиционирование текста справа от картинки
 printf "\e[1;1H"
 printf "\e[${TEXT_COL}G"
 
@@ -43,6 +49,7 @@ print_line() {
     printf "\e[${TEXT_COL}G%b\n" "$1"
 }
 
+# Функция получения информации о батарее
 get_battery_info() {
     local raw_output b_percent b_state b_time_str b_minutes h m
     raw_output=$(pmset -g batt 2>/dev/null)
@@ -93,48 +100,7 @@ get_battery_info() {
     echo "${b_percent:-0}|${b_state}|${b_time}"
 }
 
-# Исправленная функция анимации
-type_text() {
-    local text="$1"
-    local delay="${2:-0.02}"
-    local i=0
-    local len=${#text}
-    local char
-    
-    while (( i < len )); do
-        char="${text:i:1}"
-        
-        # Если нашли начало escape-последовательности (\e или \033)
-        if [[ "$char" == $'\e' ]] || [[ "$char" == $'\033' ]]; then
-            # Ищем конец последовательности (буква в конце, например 'm')
-            local j=$((i + 1))
-            while (( j < len )); do
-                local sub="${text:j:1}"
-                printf "%b" "$sub" # Выводим часть кода цвета мгновенно
-                ((j++))
-                # Если встретили управляющую букву (m, H, G, A, B и т.д.), стоп
-                if [[ "$sub" =~ [a-zA-Z] ]]; then
-                    break
-                fi
-            done
-            i=$j
-        else
-            # Обычный символ: печатаем с задержкой
-            printf "%b" "$char"
-            sleep "$delay"
-            ((i++))
-        fi
-    done
-    printf "\n"
-}
-
-print_line_animated() {
-    local text="$1"
-    local delay="${2:-0.02}"
-    printf "\e[${TEXT_COL}G"
-    type_text "$text" "$delay"
-}
-
+# --- ЛОГИКА РЕЖИМА HELLO ---
 if [[ "$MODE" == "hello" ]]; then
     USER_NAME="$USER"
     CURRENT_DATE=$(date "+%B %d, %Y")
@@ -143,25 +109,23 @@ if [[ "$MODE" == "hello" ]]; then
 
     IFS='|' read -r BAT_P BAT_S BAT_T <<< "$(get_battery_info)"
 
-    print_line_animated "${c}Hello, ${USER_NAME}${r}" 0.03
-    sleep 0.1
-    print_line_animated "-------------------" 0.01
-    sleep 0.1
-    print_line_animated "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}" 0.02
-    print_line_animated "Current time: ${c}${CURRENT_TIME}${r}" 0.02
+    print_line "${c}Hello, ${USER_NAME}${r}"
+    print_line "-------------------"
+    print_line "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}"
+    print_line "Current time: ${c}${CURRENT_TIME}${r}"
     
     if [[ "$BAT_P" == "N/A" ]]; then
-        print_line_animated "Battery: ${c}No Battery${r}" 0.02
-        print_line_animated "Est. time left: ${c}N/A${r}" 0.02
+        print_line "Battery: ${c}No Battery${r}"
+        print_line "Est. time left: ${c}N/A${r}"
     else
-        print_line_animated "Battery: ${c}${BAT_P}%${r} (${BAT_S})" 0.02
-        print_line_animated "Est. time left: ${c}${BAT_T}${r}" 0.02
+        print_line "Battery: ${c}${BAT_P}%${r} (${BAT_S})"
+        print_line "Est. time left: ${c}${BAT_T}${r}"
     fi
     
     print_line ""
-    sleep 0.2
-    print_line_animated "${c}I am at your service.${r}" 0.04
+    print_line "${c}I am at your service.${r}"
 
+# --- ЛОГИКА РЕЖИМА NORMAL ---
 else
     print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
     print_line "-------------------"
@@ -185,10 +149,12 @@ else
     fi
 
     print_line ""
+    # Цветные квадратики
     printf "\e[${TEXT_COL}G"
     for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
 fi
 
+# Финальный отступ снизу, чтобы не перекрывать ввод
 FINAL_ROW=$((IMG_ROWS + BOTTOM_GAP))
 printf "\e[${FINAL_ROW};1H"
 printf "${r}\e[0m"
