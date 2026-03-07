@@ -1,0 +1,42 @@
+#!/bin/zsh
+
+SELF_PATH=$(dirname "$(realpath "$0")")
+IMG="$SELF_PATH/images/wall.jpeg"
+
+if [[ ! -f "$IMG" ]]; then
+    echo "Ошибка: Картинка не найдена по пути $IMG"
+    exit 1
+fi
+
+IMG_WIDTH_PX=$(sips -g pixelWidth "$IMG" | awk '/pixelWidth/ {print $2}')
+DISPLAY_COLS=40
+TEXT_COL=$((DISPLAY_COLS + 4))
+
+printf "\033[H\033[2J\033[3J"
+kitten icat --clear
+
+kitten icat --place "${DISPLAY_COLS}x18@0x0" --align left "$IMG"
+
+local c="\e[1;35m"
+local r="\e[0m"
+
+printf "\e[17A"
+
+print_line() {
+    printf "\e[${TEXT_COL}C$1\n"
+}
+
+print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
+print_line "-------------------"
+print_line "${c}OS:${r}         macOS $(sw_vers -productVersion)"
+print_line "${c}Host:${r}       $(sysctl -n hw.model)"
+print_line "${c}Kernel:${r}     $(uname -r)"
+print_line "${c}Shell:${r}      zsh $ZSH_VERSION"
+print_line "${c}CPU:${r}        $(sysctl -n machdep.cpu.brand_string | sed 's/(R)//g; s/(TM)//g')"
+print_line "${c}GPU:${r}        $(system_profiler SPDisplaysDataType | grep "Chipset Model" | sed 's/.*: //')"
+print_line "${c}Memory:${r}     $(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024)) GB"
+
+printf "\n\e[${TEXT_COL}C"
+for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
+
+printf "\e[5B\n"
