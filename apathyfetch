@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-# Определение пути к скрипту
+# 1. Определение пути к скрипту
 if [[ -n "$ZSH_VERSION" ]]; then
     SCRIPT_SOURCE="${ZSH_ARGZERO:-${(%):-%N}}"
     SELF_PATH=$(dirname "$SCRIPT_SOURCE")
@@ -14,10 +14,12 @@ fi
 IMG="$SELF_PATH/images/wall.jpeg"
 MODE="normal"
 
+# Обработка аргументов
 if [[ "$1" == "--hello" ]]; then
     MODE="hello"
 fi
 
+# Проверка картинки
 if [[ ! -f "$IMG" ]]; then
     echo "Error: Image not found at $IMG"
     exit 1
@@ -26,14 +28,14 @@ fi
 # Очистка экрана
 printf "\033[H\033[2J\033[3J"
 
-# Настройки
+# --- НАСТРОЙКИ ---
 IMG_COLS=45
-IMG_ROWS=18
+IMG_ROWS=18       # Высота картинки в строках
 GAP=4
 TEXT_COL=$((IMG_COLS + GAP))
-BOTTOM_GAP=3
+BOTTOM_GAP=3      # Отступ снизу от картинки до промпта (строки)
 
-# Отрисовка картинки
+# --- ОТРИСОВКА КАРТИНКИ ---
 kitten icat --clear
 kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$IMG"
 
@@ -41,7 +43,8 @@ kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$IMG"
 c="\e[1;35m"
 r="\e[0m"
 
-# Позиционирование текста справа от картинки
+# --- ПОЗИЦИОНИРОВАНИЕ ТЕКСТА ---
+# Возвращаем курсор в верхний левый угол и сдвигаем вправо
 printf "\e[1;1H"
 printf "\e[${TEXT_COL}G"
 
@@ -49,7 +52,7 @@ print_line() {
     printf "\e[${TEXT_COL}G%b\n" "$1"
 }
 
-# Функция получения информации о батарее
+# --- ФУНКЦИЯ БАТАРЕИ ---
 get_battery_info() {
     local raw_output b_percent b_state b_time_str b_minutes h m
     raw_output=$(pmset -g batt 2>/dev/null)
@@ -100,7 +103,7 @@ get_battery_info() {
     echo "${b_percent:-0}|${b_state}|${b_time}"
 }
 
-# --- ЛОГИКА РЕЖИМА HELLO ---
+# --- ОСНОВНАЯ ЛОГИКА ---
 if [[ "$MODE" == "hello" ]]; then
     USER_NAME="$USER"
     CURRENT_DATE=$(date "+%B %d, %Y")
@@ -125,7 +128,6 @@ if [[ "$MODE" == "hello" ]]; then
     print_line ""
     print_line "${c}I am at your service.${r}"
 
-# --- ЛОГИКА РЕЖИМА NORMAL ---
 else
     print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
     print_line "-------------------"
@@ -154,7 +156,16 @@ else
     for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
 fi
 
-# Финальный отступ снизу, чтобы не перекрывать ввод
+# --- ФИНАЛЬНЫЙ ОТСТУП СНIZУ ---
+# 1. Вычисляем строку, где находится низ картинки: 1 (начало) + IMG_ROWS
+# 2. Нам нужно спуститься ниже самой длинной колонки (текста или картинки).
+# Но проще всего: спуститься на (IMG_ROWS + BOTTOM_GAP) строк от верха экрана.
+# И убедиться, что мы в первой колонке, чтобы следующий промпт начался слева.
+
 FINAL_ROW=$((IMG_ROWS + BOTTOM_GAP))
+
+# Перемещаем курсор на строку FINAL_ROW, колонка 1
 printf "\e[${FINAL_ROW};1H"
+
+# Сброс цвета
 printf "${r}\e[0m"
