@@ -29,31 +29,69 @@ fi
 printf "\033[H\033[2J\033[3J"
 
 # --- НАСТРОЙКИ ---
-IMG_COLS=45       # Ширина картинки в символах терминала
-IMG_ROWS=18       # Высота картинки в строках (должна совпадать с параметром place)
-GAP=4             # Отступ между картинкой и текстом (в символах)
+IMG_COLS=45       # Ширина картинки
+IMG_ROWS=18       # Высота картинки
+GAP=4             # Отступ
 TEXT_COL=$((IMG_COLS + GAP))
 
 # --- ОТРИСОВКА КАРТИНКИ ---
 kitten icat --clear
-# Рисуем картинку фиксированного размера в левом верхнем углу (0x0)
 kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$IMG"
 
 # Цвета
-c="\e[1;35m" # Magenta
-r="\e[0m"    # Reset
+c="\e[1;35m"
+r="\e[0m"
 
-# --- ПОЗИЦИОНИРОВАНИЕ ТЕКСТА СПРАВА ---
-# 1. Возвращаем курсор в самый верхний левый угол (строка 1, колонка 1)
+# --- ПОЗИЦИОНИРОВАНИЕ ---
 printf "\e[1;1H"
-
-# 2. Сдвигаем курсор вправо на нужное количество колонок
 printf "\e[${TEXT_COL}G"
 
-# Функция вывода строки:
-# Она гарантирует, что каждая новая строка начинается с нужного отступа слева.
 print_line() {
     printf "\e[${TEXT_COL}G%b\n" "$1"
+}
+
+# --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ БАТАРЕИ ---
+get_battery_info() {
+    local batt_raw
+    local percent
+    local status
+    local time_left
+    local rem_min
+
+    # Получаем сырые данные
+    batt_raw=$(pmset -g batt 2>/dev/null | grep -Eo "\d+%; .*" | head -1)
+
+    if [[ -z "$batt_raw" ]]; then
+        echo "N/A||Unknown"
+        return
+    fi
+
+    percent=$(echo "$batt_raw" | cut -d';' -f1 | tr -d ' %')
+    status=$(echo "$batt_raw" | cut -d';' -f2 | xargs)
+
+    # Пытаемся получить время в минутах. 
+    # Ищем паттерн типа "120 minute" или "120 minutes", берем только цифры.
+    rem_min=$(pmset -g batt 2>/dev/null | grep -oE "[0-9]+ minute" | head -1 | grep -oE "[0-9]+" | head -1)
+
+    if [[ -n "$rem_min" ]] && [[ "$rem_min" =~ ^[0-9]+$ ]]; then
+        # Безопасная математика
+        local h=$((rem_min / 60))
+        local m=$((rem_min % 60))
+        time_left="${h}h ${m}m"
+    else
+        # Фоллбэк эвристика, если система не дала точное время
+        # Проверяем, что percent это число
+        if [[ "$percent" =~ ^[0-9]+$ ]]; then
+            local est=$((percent * 3))
+            local h=$((est / 60))
+            local m=$((est % 60))
+            time_left="~${h}h ${m}m"
+        else
+            time_left="Unknown"
+        fi
+    fi
+
+    echo "${percent}|${status}|${time_left}"
 }
 
 # --- ЛОГИКА РЕЖИМА HELLO ---
@@ -63,35 +101,14 @@ if [[ "$MODE" == "hello" ]]; then
     CURRENT_TIME=$(date "+%H:%M")
     DAY_OF_WEEK=$(date "+%A")
 
-    # Батарея
-    BATT_INFO=$(pmset -g batt 2>/dev/null | grep -Eo "\d+%; .*" | head -1)
-    if [[ -n "$BATT_INFO" ]]; then
-        BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
-        BATT_STATUS_RAW=$(echo "$BATT_INFO" | cut -d';' -f2 | xargs)
-        
-        # Время работы
-        REMAINING_MIN=$(pmset -g batt 2>/dev/null | grep -oE "[0-9]+ minute" | head -1 | grep -oE "[0-9]+")
-        if [[ -n "$REMAINING_MIN" ]]; then
-            HOURS=$((REMAINING_MIN / 60))
-            MINS=$((REMAINING_MIN % 60))
-            TIME_LEFT="${HOURS}h ${MINS}m"
-        else
-            ESTIMATED_MIN=$((BATT_PERCENT * 3)) 
-            HOURS=$((ESTIMATED_MIN / 60))
-            MINS=$((ESTIMATED_MIN % 60))
-            TIME_LEFT="~${HOURS}h ${MINS}m"
-        fi
-    else
-        BATT_PERCENT="N/A"
-        BATT_STATUS_RAW=""
-        TIME_LEFT="Unknown"
-    fi
+    # Получаем данные о батарее через функцию
+    IFS='|' read -r BATT_PERCENT BATT_STATUS TIME_LEFT <<< "$(get_battery_info)"
 
     print_line "${c}Hello, ${USER_NAME}${r}"
     print_line "-------------------"
     print_line "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}"
     print_line "Current time: ${c}${CURRENT_TIME}${r}"
-    print_line "Battery: ${c}${BATT_PERCENT}${r} ${BATT_STATUS_RAW}"
+    print_line "Battery: ${c}${BATT_PERCENT}%${r} ${BATT_STATUS}"
     print_line "Est. time left: ${c}${TIME_LEFT}${r}"
     print_line ""
     print_line "${c}I am at your service.${r}"
@@ -114,10 +131,10 @@ else
     MEM_TOTAL=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
     print_line "${c}Memory:${r}     ${MEM_TOTAL} GB"
 
-    BATT_INFO=$(pmset -g batt 2>/dev/null | grep -Eo "\d+%; .*" | head -1)
-    if [[ -n "$BATT_INFO" ]]; then
-        BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
-        print_line "${c}Battery:${r}    ${BATT_PERCENT}"
+    # Батарейка
+    IFS='|' read -r BATT_PERCENT _ _ <<< "$(get_battery_info)"
+    if [[ "$BATT_PERCENT" != "N/A" ]]; then
+        print_line "${c}Battery:${r}    ${BATT_PERCENT}%"
     fi
 
     print_line ""
@@ -126,5 +143,4 @@ else
     for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
 fi
 
-# Сброс цвета
 printf "${r}\e[0m"
