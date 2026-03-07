@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-# 1. Определение пути к скрипту (исправлено для macOS без realpath)
+# 1. Определение пути к скрипту (без realpath для совместимости)
 if [[ -n "$ZSH_VERSION" ]]; then
     SCRIPT_SOURCE="${ZSH_ARGZERO:-${(%):-%N}}"
     SELF_PATH=$(dirname "$SCRIPT_SOURCE")
@@ -14,89 +14,123 @@ fi
 IMG="$SELF_PATH/images/wall.jpeg"
 MODE="normal"
 
-# 2. Обработка аргументов
+# Обработка аргументов
 if [[ "$1" == "--hello" ]]; then
     MODE="hello"
 fi
 
-# 3. Очистка экрана
-printf "\033[H\033[2J\033[3J"
-
-# 4. Проверка картинки
+# Проверка картинки
 if [[ ! -f "$IMG" ]]; then
     echo "Error: Image not found at $IMG"
     exit 1
 fi
 
-# Настройки отображения
-DISPLAY_COLS=40
-TEXT_COL=$((DISPLAY_COLS + 4))
+# Очистка экрана
+printf "\033[H\033[2J\033[3J"
 
-# Отрисовка картинки через Kitty
+# --- НАСТРОЙКИ ---
+# Ширина картинки в символах (примерно, зависит от шрифта, но kitten сам подстроит)
+IMG_COLS=45 
+# Отступ между картинкой и текстом (в символах)
+GAP=4
+TEXT_COL=$((IMG_COLS + GAP))
+
+# Отрисовка картинки
+# Мы не задаем жесткую высоту (@0x0), пусть kitten сам масштабирует, 
+# но мы ограничим ширину, чтобы текст влезал справа.
 kitten icat --clear
-kitten icat --place "${DISPLAY_COLS}x18@0x0" --align left "$IMG"
+kitten icat --place "${IMG_COLS}x25@0x0" --align left "$IMG"
 
 # Цвета
 c="\e[1;35m" # Magenta
 r="\e[0m"    # Reset
 
-# Позиционирование курсора для текста
-printf "\e[17A"
+# --- ДИНАМИЧЕСКОЕ ПОЗИЦИОНИРОВАНИЕ ---
+# Вместо жесткого \e[17A, мы спросим у терминала, где мы находимся, 
+# или просто опустимся на безопасное количество строк вниз от ВЕРХА.
+# Но самый надежный способ для Kitty: вывести картинку, затем перевести курсор в начало (0,0)
+# и спуститься на N строк вниз, где N > высота картинки.
 
+# Высота картинки в строках (мы задали 25 в place, значит спускаемся на 26+)
+IMG_ROWS=25
+SAFE_ROW=$((IMG_ROWS + 2)) # 2 строки отступа снизу от картинки
+
+# Перемещаем курсор: В начало экрана (1,1), затем вниз на SAFE_ROW строк
+printf "\e[1;1H\e[${SAFE_ROW}B"
+# Теперь курсор точно под картинкой с отступом.
+# Сдвигаем курсор вправо на TEXT_COL
+printf "\e[${TEXT_COL}G"
+
+# Функция вывода строки со смещением
 print_line() {
-    printf "\e[${TEXT_COL}C$1\n"
+    # Возвращаем курсор в начало текущей строки относительно текста? Нет, просто печатаем.
+    # Но нам нужно гарантировать, что каждая новая строка начинается с нужного отступа.
+    # Так как мы уже сдвинулись вправо перед первой строкой, просто печатаем.
+    # Для следующих строк нужно явно указывать позицию или использовать \n + сдвиг.
+    
+    # Проще: печатаем строку, затем переводим курсор на следующую строку и снова сдвигаем вправо.
+    printf "%b\n" "$1"
+    printf "\e[${TEXT_COL}G"
+}
+
+# Начальный сдвиг для первой строки (уже сделан выше через \e[${TEXT_COL}G), 
+# но функция print_line ожидает, что курсор уже на месте. 
+# Давайте сделаем проще: функция сама ставит курсор.
+
+reset_print_pos() {
+    # Эта функция будет вызываться перед каждой строкой внутри логики, 
+    # но так как мы используем цикл или последовательный вывод, 
+    # лучше модифицировать print_line.
+    :
+}
+
+# Переопределим print_line для надежности:
+# Она ставит курсор в нужную колонку ТЕКУЩЕЙ строки.
+print_line() {
+    printf "\e[${TEXT_COL}G%b\n" "$1"
 }
 
 # --- ЛОГИКА РЕЖИМА HELLO ---
 if [[ "$MODE" == "hello" ]]; then
     USER_NAME="$USER"
-    
-    # Дата и время
-    CURRENT_DATE=$(date "+%B %d, %Y") # October 25, 2023
-    CURRENT_TIME=$(date "+%H:%M")     # 14:30
-    DAY_OF_WEEK=$(date "+%A")         # Wednesday
+    CURRENT_DATE=$(date "+%B %d, %Y")
+    CURRENT_TIME=$(date "+%H:%M")
+    DAY_OF_WEEK=$(date "+%A")
 
     # Батарея
-    BATT_INFO=$(pmset -g batt | grep -Eo "\d+%; .*" | head -1)
-    BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
-    BATT_STATUS_RAW=$(echo "$BATT_INFO" | cut -d';' -f2 | xargs)
-    
-    # Расчет времени работы (очень примерно)
-    # Если заряжается или статус unknown, ставим прочерк
-    if [[ "$BATT_STATUS_RAW" == *"charging"* ]] || [[ -z "$BATT_PERCENT" ]]; then
-        TIME_LEFT="calculating..."
-    else
-        # Берем текущий заряд в минутах (если доступно) или считаем грубо
-        # pmset может не давать точное время оставшееся без истории разряда, 
-        # поэтому используем эвристику: % * 3 минуты (среднее потребление)
-        # Для большей точности можно парсить 'time remaining', если оно есть в выводе pmset
+    BATT_INFO=$(pmset -g batt 2>/dev/null | grep -Eo "\d+%; .*" | head -1)
+    if [[ -n "$BATT_INFO" ]]; then
+        BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
+        BATT_STATUS_RAW=$(echo "$BATT_INFO" | cut -d';' -f2 | xargs)
         
-        REMAINING_MIN=$(pmset -g batt | grep -oE "[0-9]+ minute" | head -1 | grep -oE "[0-9]+")
-        
+        # Время работы
+        REMAINING_MIN=$(pmset -g batt 2>/dev/null | grep -oE "[0-9]+ minute" | head -1 | grep -oE "[0-9]+")
         if [[ -n "$REMAINING_MIN" ]]; then
             HOURS=$((REMAINING_MIN / 60))
             MINS=$((REMAINING_MIN % 60))
             TIME_LEFT="${HOURS}h ${MINS}m"
         else
-            # Фоллбэк эвристика, если система не дает точное время
             ESTIMATED_MIN=$((BATT_PERCENT * 3)) 
             HOURS=$((ESTIMATED_MIN / 60))
             MINS=$((ESTIMATED_MIN % 60))
-            TIME_LEFT="~${HOURS}h ${MINS}m (est.)"
+            TIME_LEFT="~${HOURS}h ${MINS}m"
         fi
+    else
+        BATT_PERCENT="N/A"
+        BATT_STATUS_RAW=""
+        TIME_LEFT="Unknown"
     fi
 
-    # Формирование приветствия
     print_line "${c}Hello, ${USER_NAME}${r}"
     print_line "-------------------"
     print_line "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}"
     print_line "Current time: ${c}${CURRENT_TIME}${r}"
-    print_line "Battery: ${c}${BATT_PERCENT}${r} (${BATT_STATUS_RAW})"
-    print_line "Estimated time left: ${c}${TIME_LEFT}${r}"
+    print_line "Battery: ${c}${BATT_PERCENT}${r} ${BATT_STATUS_RAW}"
+    print_line "Est. time left: ${c}${TIME_LEFT}${r}"
     print_line ""
     print_line "${c}I am at your service.${r}"
 
-# --- ЛОГИКА РЕЖИМА NORMAL (Стандартный фечер) ---
+# --- ЛОГИКА РЕЖИМА NORMAL ---
 else
     print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
     print_line "-------------------"
@@ -114,18 +148,17 @@ else
     MEM_TOTAL=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
     print_line "${c}Memory:${r}     ${MEM_TOTAL} GB"
 
-    # Батарейка (коротко)
-    BATT_INFO=$(pmset -g batt | grep -Eo "\d+%; .*" | head -1)
+    BATT_INFO=$(pmset -g batt 2>/dev/null | grep -Eo "\d+%; .*" | head -1)
     if [[ -n "$BATT_INFO" ]]; then
         BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
         print_line "${c}Battery:${r}    ${BATT_PERCENT}"
     fi
 
     print_line ""
-    # Цветные квадратики внизу
-    printf "\e[${TEXT_COL}C"
+    # Цветные квадратики
+    printf "\e[${TEXT_COL}G"
     for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
 fi
 
-# Небольшая задержка перед возвратом управления (опционально)
-# sleep 0.1
+# Сброс цвета и курсора в конец (опционально)
+printf "${r}\e[0m"
