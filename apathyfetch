@@ -1,57 +1,131 @@
 #!/bin/zsh
 
-# Корректное определение пути скрипта для macOS и Linux
+# 1. Определение пути к скрипту (исправлено для macOS без realpath)
 if [[ -n "$ZSH_VERSION" ]]; then
-    # Для ZSH используем встроенную переменную $ZSH_ARGZERO или $0
     SCRIPT_SOURCE="${ZSH_ARGZERO:-${(%):-%N}}"
     SELF_PATH=$(dirname "$SCRIPT_SOURCE")
-    
-    # Если путь относительный, делаем его абсолютным
     if [[ "$SELF_PATH" != /* ]]; then
         SELF_PATH="$(cd "$SELF_PATH" && pwd)"
     fi
 else
-    # Fallback для Bash (если вдруг запустят через bash)
     SELF_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 fi
 
 IMG="$SELF_PATH/images/wall.jpeg"
+MODE="normal"
 
+# 2. Обработка аргументов
+if [[ "$1" == "--hello" ]]; then
+    MODE="hello"
+fi
+
+# 3. Очистка экрана
+printf "\033[H\033[2J\033[3J"
+
+# 4. Проверка картинки
 if [[ ! -f "$IMG" ]]; then
-    echo "Ошибка: Картинка не найдена по пути $IMG"
-    echo "Проверьте, что папка images и файл wall.jpeg существуют."
+    echo "Error: Image not found at $IMG"
     exit 1
 fi
 
-IMG_WIDTH_PX=$(sips -g pixelWidth "$IMG" | awk '/pixelWidth/ {print $2}')
+# Настройки отображения
 DISPLAY_COLS=40
 TEXT_COL=$((DISPLAY_COLS + 4))
 
-printf "\033[H\033[2J\033[3J"
+# Отрисовка картинки через Kitty
 kitten icat --clear
-
 kitten icat --place "${DISPLAY_COLS}x18@0x0" --align left "$IMG"
 
-local c="\e[1;35m"
-local r="\e[0m"
+# Цвета
+c="\e[1;35m" # Magenta
+r="\e[0m"    # Reset
 
+# Позиционирование курсора для текста
 printf "\e[17A"
 
 print_line() {
     printf "\e[${TEXT_COL}C$1\n"
 }
 
-print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
-print_line "-------------------"
-print_line "${c}OS:${r}         macOS $(sw_vers -productVersion)"
-print_line "${c}Host:${r}       $(sysctl -n hw.model)"
-print_line "${c}Kernel:${r}     $(uname -r)"
-print_line "${c}Shell:${r}      zsh $ZSH_VERSION"
-print_line "${c}CPU:${r}        $(sysctl -n machdep.cpu.brand_string | sed 's/(R)//g; s/(TM)//g')"
-print_line "${c}GPU:${r}        $(system_profiler SPDisplaysDataType | grep "Chipset Model" | sed 's/.*: //')"
-print_line "${c}Memory:${r}     $(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024)) GB"
+# --- ЛОГИКА РЕЖИМА HELLO ---
+if [[ "$MODE" == "hello" ]]; then
+    USER_NAME="$USER"
+    
+    # Дата и время
+    CURRENT_DATE=$(date "+%B %d, %Y") # October 25, 2023
+    CURRENT_TIME=$(date "+%H:%M")     # 14:30
+    DAY_OF_WEEK=$(date "+%A")         # Wednesday
 
-printf "\n\e[${TEXT_COL}C"
-for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
+    # Батарея
+    BATT_INFO=$(pmset -g batt | grep -Eo "\d+%; .*" | head -1)
+    BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
+    BATT_STATUS_RAW=$(echo "$BATT_INFO" | cut -d';' -f2 | xargs)
+    
+    # Расчет времени работы (очень примерно)
+    # Если заряжается или статус unknown, ставим прочерк
+    if [[ "$BATT_STATUS_RAW" == *"charging"* ]] || [[ -z "$BATT_PERCENT" ]]; then
+        TIME_LEFT="calculating..."
+    else
+        # Берем текущий заряд в минутах (если доступно) или считаем грубо
+        # pmset может не давать точное время оставшееся без истории разряда, 
+        # поэтому используем эвристику: % * 3 минуты (среднее потребление)
+        # Для большей точности можно парсить 'time remaining', если оно есть в выводе pmset
+        
+        REMAINING_MIN=$(pmset -g batt | grep -oE "[0-9]+ minute" | head -1 | grep -oE "[0-9]+")
+        
+        if [[ -n "$REMAINING_MIN" ]]; then
+            HOURS=$((REMAINING_MIN / 60))
+            MINS=$((REMAINING_MIN % 60))
+            TIME_LEFT="${HOURS}h ${MINS}m"
+        else
+            # Фоллбэк эвристика, если система не дает точное время
+            ESTIMATED_MIN=$((BATT_PERCENT * 3)) 
+            HOURS=$((ESTIMATED_MIN / 60))
+            MINS=$((ESTIMATED_MIN % 60))
+            TIME_LEFT="~${HOURS}h ${MINS}m (est.)"
+        fi
+    fi
 
-printf "\e[5B\n"
+    # Формирование приветствия
+    print_line "${c}Hello, ${USER_NAME}${r}"
+    print_line "-------------------"
+    print_line "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}"
+    print_line "Current time: ${c}${CURRENT_TIME}${r}"
+    print_line "Battery: ${c}${BATT_PERCENT}${r} (${BATT_STATUS_RAW})"
+    print_line "Estimated time left: ${c}${TIME_LEFT}${r}"
+    print_line ""
+    print_line "${c}I am at your service.${r}"
+
+# --- ЛОГИКА РЕЖИМА NORMAL (Стандартный фечер) ---
+else
+    print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
+    print_line "-------------------"
+    print_line "${c}OS:${r}         macOS $(sw_vers -productVersion)"
+    print_line "${c}Host:${r}       $(sysctl -n hw.model)"
+    print_line "${c}Kernel:${r}     $(uname -r)"
+    print_line "${c}Shell:${r}      zsh $ZSH_VERSION"
+    
+    CPU=$(sysctl -n machdep.cpu.brand_string | sed 's/(R)//g; s/(TM)//g')
+    print_line "${c}CPU:${r}        ${CPU}"
+    
+    GPU=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -m1 "Chipset Model" | sed 's/.*: //')
+    print_line "${c}GPU:${r}        ${GPU:-Unknown}"
+    
+    MEM_TOTAL=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
+    print_line "${c}Memory:${r}     ${MEM_TOTAL} GB"
+
+    # Батарейка (коротко)
+    BATT_INFO=$(pmset -g batt | grep -Eo "\d+%; .*" | head -1)
+    if [[ -n "$BATT_INFO" ]]; then
+        BATT_PERCENT=$(echo "$BATT_INFO" | cut -d';' -f1)
+        print_line "${c}Battery:${r}    ${BATT_PERCENT}"
+    fi
+
+    print_line ""
+    # Цветные квадратики внизу
+    printf "\e[${TEXT_COL}C"
+    for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
+fi
+
+# Небольшая задержка перед возвратом управления (опционально)
+# sleep 0.1
