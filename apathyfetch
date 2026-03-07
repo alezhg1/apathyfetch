@@ -11,17 +11,48 @@ else
     SELF_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 fi
 
-IMG="$SELF_PATH/images/wall.jpeg"
+# Настройки путей и режимов
+IMG_GIF="$SELF_PATH/images/wall.gif"
+IMG_JPG="$SELF_PATH/images/wall.jpeg"
 MODE="normal"
+ANIMATE=false
 
 # Обработка аргументов
-if [[ "$1" == "--hello" ]]; then
-    MODE="hello"
-fi
+for arg in "$@"; do
+    case $arg in
+        --hello) MODE="hello" ;;
+        --gif) ANIMATE=true ;;
+    esac
+done
 
-# Проверка картинки
-if [[ ! -f "$IMG" ]]; then
-    echo "Error: Image not found at $IMG"
+# Определение итогового файла изображения
+TARGET_IMG=""
+TEMP_STATIC_IMG=""
+
+# Логика выбора файла
+if [[ -f "$IMG_GIF" ]]; then
+    if [[ "$ANIMATE" == true ]]; then
+        # Режим анимации: используем оригинал
+        TARGET_IMG="$IMG_GIF"
+    else
+        # Режим статики: вырезаем первый кадр через sips
+        TEMP_STATIC_IMG=$(mktemp /tmp/apathy_static_XXXXXX.jpg)
+        # sips может не открыть GIF напрямую для конвертации первого кадра в некоторых версиях,
+        # но обычно справляется. Если нет - fallback на jpeg если он есть.
+        if sips -s format jpeg "$IMG_GIF" --out "$TEMP_STATIC_IMG" >/dev/null 2>&1; then
+            TARGET_IMG="$TEMP_STATIC_IMG"
+        elif [[ -f "$IMG_JPG" ]]; then
+            # Если конвертация не вышла, но есть jpeg рядом - берем его
+            TARGET_IMG="$IMG_JPG"
+        else
+            # Иначе показываем gif (пусть будет анимация, если не смогли сделать статику)
+            TARGET_IMG="$IMG_GIF"
+        fi
+    fi
+elif [[ -f "$IMG_JPG" ]]; then
+    TARGET_IMG="$IMG_JPG"
+else
+    echo "Error: No image found (wall.gif or wall.jpeg)"
     exit 1
 fi
 
@@ -30,21 +61,21 @@ printf "\033[H\033[2J\033[3J"
 
 # --- НАСТРОЙКИ ---
 IMG_COLS=45
-IMG_ROWS=18       # Высота картинки в строках
+IMG_ROWS=18
 GAP=4
 TEXT_COL=$((IMG_COLS + GAP))
-BOTTOM_GAP=3      # Отступ снизу от картинки до промпта (строки)
+BOTTOM_GAP=3
 
 # --- ОТРИСОВКА КАРТИНКИ ---
 kitten icat --clear
-kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$IMG"
+# Передаем выбранный файл (статичный jpg или оригинальный gif)
+kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$TARGET_IMG"
 
 # Цвета
 c="\e[1;35m"
 r="\e[0m"
 
-# --- ПОЗИЦИОНИРОВАНИЕ ТЕКСТА ---
-# Возвращаем курсор в верхний левый угол и сдвигаем вправо
+# Позиционирование текста
 printf "\e[1;1H"
 printf "\e[${TEXT_COL}G"
 
@@ -157,15 +188,12 @@ else
 fi
 
 # --- ФИНАЛЬНЫЙ ОТСТУП СНIZУ ---
-# 1. Вычисляем строку, где находится низ картинки: 1 (начало) + IMG_ROWS
-# 2. Нам нужно спуститься ниже самой длинной колонки (текста или картинки).
-# Но проще всего: спуститься на (IMG_ROWS + BOTTOM_GAP) строк от верха экрана.
-# И убедиться, что мы в первой колонке, чтобы следующий промпт начался слева.
-
 FINAL_ROW=$((IMG_ROWS + BOTTOM_GAP))
-
-# Перемещаем курсор на строку FINAL_ROW, колонка 1
 printf "\e[${FINAL_ROW};1H"
 
-# Сброс цвета
+# Очистка временного файла если был создан
+if [[ -n "$TEMP_STATIC_IMG" ]] && [[ -f "$TEMP_STATIC_IMG" ]]; then
+    rm -f "$TEMP_STATIC_IMG"
+fi
+
 printf "${r}\e[0m"
