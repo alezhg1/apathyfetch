@@ -11,11 +11,11 @@ else
     SELF_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 fi
 
-# Настройки путей и режимов
-IMG_GIF="$SELF_PATH/images/wall.gif"
-IMG_JPG="$SELF_PATH/images/wall.jpeg"
+IMG_DIR="$SELF_PATH/images"
 MODE="normal"
 ANIMATE=false
+TARGET_IMG=""
+TEMP_STATIC_IMG=""
 
 # Обработка аргументов
 for arg in "$@"; do
@@ -25,35 +25,59 @@ for arg in "$@"; do
     esac
 done
 
-# Определение итогового файла изображения
-TARGET_IMG=""
-TEMP_STATIC_IMG=""
+# --- ЛОГИКА ПОИСКА ФАЙЛОВ ---
 
-# Логика выбора файла
-if [[ -f "$IMG_GIF" ]]; then
-    if [[ "$ANIMATE" == true ]]; then
-        # Режим анимации: используем оригинал
-        TARGET_IMG="$IMG_GIF"
+# 1. Ищем обычное фото (wall с любым расширением, кроме .gif)
+# Поддерживаем: .jpg, .jpeg, .png, .webp, .heic, .bmp, .tiff
+FOUND_STATIC=false
+for ext in jpg jpeg png webp heic bmp tiff JPG JPEG PNG WEBP HEIC BMP TIFF; do
+    if [[ -f "$IMG_DIR/wall.$ext" ]]; then
+        TARGET_IMG="$IMG_DIR/wall.$ext"
+        FOUND_STATIC=true
+        break
+    fi
+done
+
+# 2. Ищем гифку (строго wall.gif)
+FOUND_GIF=false
+if [[ -f "$IMG_DIR/wall.gif" ]]; then
+    FOUND_GIF=true
+fi
+
+# 3. Принятие решения что показывать
+if [[ "$ANIMATE" == true ]]; then
+    # Режим анимации
+    if [[ "$FOUND_GIF" == true ]]; then
+        TARGET_IMG="$IMG_DIR/wall.gif"
     else
-        # Режим статики: вырезаем первый кадр через sips
-        TEMP_STATIC_IMG=$(mktemp /tmp/apathy_static_XXXXXX.jpg)
-        # sips может не открыть GIF напрямую для конвертации первого кадра в некоторых версиях,
-        # но обычно справляется. Если нет - fallback на jpeg если он есть.
-        if sips -s format jpeg "$IMG_GIF" --out "$TEMP_STATIC_IMG" >/dev/null 2>&1; then
-            TARGET_IMG="$TEMP_STATIC_IMG"
-        elif [[ -f "$IMG_JPG" ]]; then
-            # Если конвертация не вышла, но есть jpeg рядом - берем его
-            TARGET_IMG="$IMG_JPG"
+        echo -e "\e[1;31mError:\e[0m Flag --gif used, but 'images/wall.gif' not found."
+        echo "Please add a GIF named 'wall.gif' to the images folder."
+        # Если хотели гифку, но её нет, пробуем показать статику если есть
+        if [[ "$FOUND_STATIC" == true ]]; then
+            echo "Falling back to static image: $TARGET_IMG"
         else
-            # Иначе показываем gif (пусть будет анимация, если не смогли сделать статику)
-            TARGET_IMG="$IMG_GIF"
+            exit 1
         fi
     fi
-elif [[ -f "$IMG_JPG" ]]; then
-    TARGET_IMG="$IMG_JPG"
 else
-    echo "Error: No image found (wall.gif or wall.jpeg)"
-    exit 1
+    # Режим статики (по умолчанию)
+    if [[ "$FOUND_STATIC" == true ]]; then
+        # Используем найденное фото
+        TARGET_IMG="$TARGET_IMG"
+    elif [[ "$FOUND_GIF" == true ]]; then
+        # Фото нет, но есть гифка. 
+        # Если не просили анимацию, мы все равно покажем гифку (kitten покажет 1 кадр или зациклит, зависит от версии),
+        # НО по заданию: "гифку только гифкой". 
+        # Значит, если нет обычного фото и нет флага --gif, мы не должны показывать гифку как фото?
+        # Обычно пользователь хочет видеть хоть что-то. Давайте покажем гифку, kitten часто сам справляется.
+        # Или лучше вывести ошибку? Давайте выведем гифку, так надежнее для UX.
+        TARGET_IMG="$IMG_DIR/wall.gif"
+        echo -e "\e[1;33mWarning:\e[0m No static 'wall.*' image found. Using 'wall.gif' without animation flag."
+    else
+        echo -e "\e[1;31mError:\e[0m No image found in '$IMG_DIR'."
+        echo "Expected: 'wall.jpg', 'wall.png', etc. OR 'wall.gif' with --gif flag."
+        exit 1
+    fi
 fi
 
 # Очистка экрана
@@ -68,7 +92,6 @@ BOTTOM_GAP=3
 
 # --- ОТРИСОВКА КАРТИНКИ ---
 kitten icat --clear
-# Передаем выбранный файл (статичный jpg или оригинальный gif)
 kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$TARGET_IMG"
 
 # Цвета
@@ -191,7 +214,7 @@ fi
 FINAL_ROW=$((IMG_ROWS + BOTTOM_GAP))
 printf "\e[${FINAL_ROW};1H"
 
-# Очистка временного файла если был создан
+# Очистка временного файла если был создан (в данной версии не используется, но на будущее)
 if [[ -n "$TEMP_STATIC_IMG" ]] && [[ -f "$TEMP_STATIC_IMG" ]]; then
     rm -f "$TEMP_STATIC_IMG"
 fi
