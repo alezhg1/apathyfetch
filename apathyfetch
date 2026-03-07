@@ -93,15 +93,37 @@ get_battery_info() {
     echo "${b_percent:-0}|${b_state}|${b_time}"
 }
 
+# Исправленная функция анимации
 type_text() {
     local text="$1"
     local delay="${2:-0.02}"
-    local i char
-    for ((i=0; i<${#text}; i++)); do
-        char="${text:$i:1}"
-        # ИСПРАВЛЕНО: %b вместо %s для обработки цветов
-        printf "%b" "$char"
-        sleep "$delay"
+    local i=0
+    local len=${#text}
+    local char
+    
+    while (( i < len )); do
+        char="${text:i:1}"
+        
+        # Если нашли начало escape-последовательности (\e или \033)
+        if [[ "$char" == $'\e' ]] || [[ "$char" == $'\033' ]]; then
+            # Ищем конец последовательности (буква в конце, например 'm')
+            local j=$((i + 1))
+            while (( j < len )); do
+                local sub="${text:j:1}"
+                printf "%b" "$sub" # Выводим часть кода цвета мгновенно
+                ((j++))
+                # Если встретили управляющую букву (m, H, G, A, B и т.д.), стоп
+                if [[ "$sub" =~ [a-zA-Z] ]]; then
+                    break
+                fi
+            done
+            i=$j
+        else
+            # Обычный символ: печатаем с задержкой
+            printf "%b" "$char"
+            sleep "$delay"
+            ((i++))
+        fi
     done
     printf "\n"
 }
