@@ -30,9 +30,10 @@ printf "\033[H\033[2J\033[3J"
 
 # --- НАСТРОЙКИ ---
 IMG_COLS=45
-IMG_ROWS=18
+IMG_ROWS=18       # Высота картинки в строках
 GAP=4
 TEXT_COL=$((IMG_COLS + GAP))
+BOTTOM_GAP=3      # Отступ снизу от картинки до промпта (строки)
 
 # --- ОТРИСОВКА КАРТИНКИ ---
 kitten icat --clear
@@ -42,7 +43,8 @@ kitten icat --place "${IMG_COLS}x${IMG_ROWS}@0x0" --align left "$IMG"
 c="\e[1;35m"
 r="\e[0m"
 
-# --- ПОЗИЦИОНИРОВАНИЕ ---
+# --- ПОЗИЦИОНИРОВАНИЕ ТЕКСТА ---
+# Возвращаем курсор в верхний левый угол и сдвигаем вправо
 printf "\e[1;1H"
 printf "\e[${TEXT_COL}G"
 
@@ -50,28 +52,18 @@ print_line() {
     printf "\e[${TEXT_COL}G%b\n" "$1"
 }
 
-# --- УЛУЧШЕННАЯ ФУНКЦИЯ БАТАРЕИ ---
+# --- ФУНКЦИЯ БАТАРЕИ ---
 get_battery_info() {
-    local raw_output
-    local b_percent
-    local b_state
-    local b_time_str
-    local b_minutes
-    local h m est
-
-    # Получаем вывод pmset
+    local raw_output b_percent b_state b_time_str b_minutes h m
     raw_output=$(pmset -g batt 2>/dev/null)
     
-    # Если команда не вернула ничего (например, десктоп), возвращаем заглушку
     if [[ -z "$raw_output" ]]; then
         echo "N/A|No Battery|Unknown"
         return
     fi
 
-    # Парсим процент (ищем цифры перед %)
     b_percent=$(echo "$raw_output" | grep -oE "[0-9]+%" | head -1 | tr -d '%')
     
-    # Парсим статус (ищем ключевые слова)
     if echo "$raw_output" | grep -q "charging"; then
         b_state="Charging"
     elif echo "$raw_output" | grep -q "discharging"; then
@@ -82,28 +74,20 @@ get_battery_info() {
         b_state="Unknown"
     fi
 
-    # Парсим время (ищем "hh:mm remaining" или просто минуты)
-    # Вариант 1: "1:20 remaining" -> переводим в минуты
     b_time_str=$(echo "$raw_output" | grep -oE "[0-9]+:[0-9]+ remaining" | head -1)
     
     if [[ -n "$b_time_str" ]]; then
-        # Есть формат ЧЧ:ММ
         local hours_part=${b_time_str%%:*}
         local mins_part=${b_time_str##*:}
-        mins_part=${mins_part%% *} # убираем слово remaining
+        mins_part=${mins_part%% *}
         b_minutes=$((10#$hours_part * 60 + 10#$mins_part))
     else
-        # Вариант 2: ищем просто минуты "(120 minutes)"
         b_minutes=$(echo "$raw_output" | grep -oE "\([0-9]+ minutes" | grep -oE "[0-9]+" | head -1)
-        
-        # Если и этого нет, но батарея есть -> эвристика
         if [[ -z "$b_minutes" ]] && [[ -n "$b_percent" ]]; then
-            # Грубая оценка: 1% ≈ 2-3 минуты (зависит от ноутбука)
             b_minutes=$((b_percent * 2)) 
         fi
     fi
 
-    # Формируем строку времени
     if [[ -n "$b_minutes" ]] && [[ "$b_minutes" =~ ^[0-9]+$ ]]; then
         h=$((b_minutes / 60))
         m=$((b_minutes % 60))
@@ -116,22 +100,16 @@ get_battery_info() {
         b_time="Calculating..."
     fi
 
-    # Возвращаем результат через разделитель |
-    # Важно: используем другие имена переменных, чтобы не конфликтовать со статусом выхода
     echo "${b_percent:-0}|${b_state}|${b_time}"
 }
 
-# --- ЛОГИКА РЕЖИМА HELLO ---
+# --- ОСНОВНАЯ ЛОГИКА ---
 if [[ "$MODE" == "hello" ]]; then
     USER_NAME="$USER"
-    
-    # Дата и время (универсальный формат, не зависит от локали системы для логики, но выводим как есть)
     CURRENT_DATE=$(date "+%B %d, %Y")
     CURRENT_TIME=$(date "+%H:%M")
     DAY_OF_WEEK=$(date "+%A")
 
-    # Получаем данные о батарее
-    # Используем read с разделителем IFS
     IFS='|' read -r BAT_P BAT_S BAT_T <<< "$(get_battery_info)"
 
     print_line "${c}Hello, ${USER_NAME}${r}"
@@ -139,7 +117,6 @@ if [[ "$MODE" == "hello" ]]; then
     print_line "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}"
     print_line "Current time: ${c}${CURRENT_TIME}${r}"
     
-    # Красивый вывод батареи
     if [[ "$BAT_P" == "N/A" ]]; then
         print_line "Battery: ${c}No Battery${r}"
         print_line "Est. time left: ${c}N/A${r}"
@@ -151,7 +128,6 @@ if [[ "$MODE" == "hello" ]]; then
     print_line ""
     print_line "${c}I am at your service.${r}"
 
-# --- ЛОГИКА РЕЖИМА NORMAL ---
 else
     print_line "${c}${USER}${r}@${c}$(hostname -s)${r}"
     print_line "-------------------"
@@ -169,7 +145,6 @@ else
     MEM_TOTAL=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
     print_line "${c}Memory:${r}     ${MEM_TOTAL} GB"
 
-    # Батарейка
     IFS='|' read -r BAT_P _ _ <<< "$(get_battery_info)"
     if [[ "$BAT_P" != "N/A" ]]; then
         print_line "${c}Battery:${r}    ${BAT_P}%"
@@ -181,4 +156,16 @@ else
     for i in {0..7}; do printf "\e[4${i}m  "; done; printf "${r}\n"
 fi
 
+# --- ФИНАЛЬНЫЙ ОТСТУП СНIZУ ---
+# 1. Вычисляем строку, где находится низ картинки: 1 (начало) + IMG_ROWS
+# 2. Нам нужно спуститься ниже самой длинной колонки (текста или картинки).
+# Но проще всего: спуститься на (IMG_ROWS + BOTTOM_GAP) строк от верха экрана.
+# И убедиться, что мы в первой колонке, чтобы следующий промпт начался слева.
+
+FINAL_ROW=$((IMG_ROWS + BOTTOM_GAP))
+
+# Перемещаем курсор на строку FINAL_ROW, колонка 1
+printf "\e[${FINAL_ROW};1H"
+
+# Сброс цвета
 printf "${r}\e[0m"
