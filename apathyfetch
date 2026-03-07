@@ -1,10 +1,25 @@
 #!/bin/zsh
 
-SELF_PATH=$(dirname "$(realpath "$0")")
+# Корректное определение пути скрипта для macOS и Linux
+if [[ -n "$ZSH_VERSION" ]]; then
+    # Для ZSH используем встроенную переменную $ZSH_ARGZERO или $0
+    SCRIPT_SOURCE="${ZSH_ARGZERO:-${(%):-%N}}"
+    SELF_PATH=$(dirname "$SCRIPT_SOURCE")
+    
+    # Если путь относительный, делаем его абсолютным
+    if [[ "$SELF_PATH" != /* ]]; then
+        SELF_PATH="$(cd "$SELF_PATH" && pwd)"
+    fi
+else
+    # Fallback для Bash (если вдруг запустят через bash)
+    SELF_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+fi
+
 IMG="$SELF_PATH/images/wall.jpeg"
 
 if [[ ! -f "$IMG" ]]; then
     echo "Ошибка: Картинка не найдена по пути $IMG"
+    echo "Проверьте, что папка images и файл wall.jpeg существуют."
     exit 1
 fi
 
