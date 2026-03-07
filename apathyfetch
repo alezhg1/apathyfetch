@@ -29,9 +29,9 @@ fi
 printf "\033[H\033[2J\033[3J"
 
 # --- НАСТРОЙКИ ---
-IMG_COLS=45       # Ширина картинки
-IMG_ROWS=18       # Высота картинки
-GAP=4             # Отступ
+IMG_COLS=45
+IMG_ROWS=18
+GAP=4
 TEXT_COL=$((IMG_COLS + GAP))
 
 # --- ОТРИСОВКА КАРТИНКИ ---
@@ -50,66 +50,104 @@ print_line() {
     printf "\e[${TEXT_COL}G%b\n" "$1"
 }
 
-# --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ БАТАРЕИ ---
+# --- УЛУЧШЕННАЯ ФУНКЦИЯ БАТАРЕИ ---
 get_battery_info() {
-    local batt_raw
-    local percent
-    local status
-    local time_left
-    local rem_min
+    local raw_output
+    local b_percent
+    local b_state
+    local b_time_str
+    local b_minutes
+    local h m est
 
-    # Получаем сырые данные
-    batt_raw=$(pmset -g batt 2>/dev/null | grep -Eo "\d+%; .*" | head -1)
-
-    if [[ -z "$batt_raw" ]]; then
-        echo "N/A||Unknown"
+    # Получаем вывод pmset
+    raw_output=$(pmset -g batt 2>/dev/null)
+    
+    # Если команда не вернула ничего (например, десктоп), возвращаем заглушку
+    if [[ -z "$raw_output" ]]; then
+        echo "N/A|No Battery|Unknown"
         return
     fi
 
-    percent=$(echo "$batt_raw" | cut -d';' -f1 | tr -d ' %')
-    status=$(echo "$batt_raw" | cut -d';' -f2 | xargs)
-
-    # Пытаемся получить время в минутах. 
-    # Ищем паттерн типа "120 minute" или "120 minutes", берем только цифры.
-    rem_min=$(pmset -g batt 2>/dev/null | grep -oE "[0-9]+ minute" | head -1 | grep -oE "[0-9]+" | head -1)
-
-    if [[ -n "$rem_min" ]] && [[ "$rem_min" =~ ^[0-9]+$ ]]; then
-        # Безопасная математика
-        local h=$((rem_min / 60))
-        local m=$((rem_min % 60))
-        time_left="${h}h ${m}m"
+    # Парсим процент (ищем цифры перед %)
+    b_percent=$(echo "$raw_output" | grep -oE "[0-9]+%" | head -1 | tr -d '%')
+    
+    # Парсим статус (ищем ключевые слова)
+    if echo "$raw_output" | grep -q "charging"; then
+        b_state="Charging"
+    elif echo "$raw_output" | grep -q "discharging"; then
+        b_state="Discharging"
+    elif echo "$raw_output" | grep -q "AC attached"; then
+        b_state="AC Attached"
     else
-        # Фоллбэк эвристика, если система не дала точное время
-        # Проверяем, что percent это число
-        if [[ "$percent" =~ ^[0-9]+$ ]]; then
-            local est=$((percent * 3))
-            local h=$((est / 60))
-            local m=$((est % 60))
-            time_left="~${h}h ${m}m"
-        else
-            time_left="Unknown"
+        b_state="Unknown"
+    fi
+
+    # Парсим время (ищем "hh:mm remaining" или просто минуты)
+    # Вариант 1: "1:20 remaining" -> переводим в минуты
+    b_time_str=$(echo "$raw_output" | grep -oE "[0-9]+:[0-9]+ remaining" | head -1)
+    
+    if [[ -n "$b_time_str" ]]; then
+        # Есть формат ЧЧ:ММ
+        local hours_part=${b_time_str%%:*}
+        local mins_part=${b_time_str##*:}
+        mins_part=${mins_part%% *} # убираем слово remaining
+        b_minutes=$((10#$hours_part * 60 + 10#$mins_part))
+    else
+        # Вариант 2: ищем просто минуты "(120 minutes)"
+        b_minutes=$(echo "$raw_output" | grep -oE "\([0-9]+ minutes" | grep -oE "[0-9]+" | head -1)
+        
+        # Если и этого нет, но батарея есть -> эвристика
+        if [[ -z "$b_minutes" ]] && [[ -n "$b_percent" ]]; then
+            # Грубая оценка: 1% ≈ 2-3 минуты (зависит от ноутбука)
+            b_minutes=$((b_percent * 2)) 
         fi
     fi
 
-    echo "${percent}|${status}|${time_left}"
+    # Формируем строку времени
+    if [[ -n "$b_minutes" ]] && [[ "$b_minutes" =~ ^[0-9]+$ ]]; then
+        h=$((b_minutes / 60))
+        m=$((b_minutes % 60))
+        if [[ "$h" -gt 0 ]]; then
+            b_time="${h}h ${m}m"
+        else
+            b_time="< 1h (${m}m)"
+        fi
+    else
+        b_time="Calculating..."
+    fi
+
+    # Возвращаем результат через разделитель |
+    # Важно: используем другие имена переменных, чтобы не конфликтовать со статусом выхода
+    echo "${b_percent:-0}|${b_state}|${b_time}"
 }
 
 # --- ЛОГИКА РЕЖИМА HELLO ---
 if [[ "$MODE" == "hello" ]]; then
     USER_NAME="$USER"
+    
+    # Дата и время (универсальный формат, не зависит от локали системы для логики, но выводим как есть)
     CURRENT_DATE=$(date "+%B %d, %Y")
     CURRENT_TIME=$(date "+%H:%M")
     DAY_OF_WEEK=$(date "+%A")
 
-    # Получаем данные о батарее через функцию
-    IFS='|' read -r BATT_PERCENT BATT_STATUS TIME_LEFT <<< "$(get_battery_info)"
+    # Получаем данные о батарее
+    # Используем read с разделителем IFS
+    IFS='|' read -r BAT_P BAT_S BAT_T <<< "$(get_battery_info)"
 
     print_line "${c}Hello, ${USER_NAME}${r}"
     print_line "-------------------"
     print_line "Today is ${c}${DAY_OF_WEEK}${r}, ${c}${CURRENT_DATE}${r}"
     print_line "Current time: ${c}${CURRENT_TIME}${r}"
-    print_line "Battery: ${c}${BATT_PERCENT}%${r} ${BATT_STATUS}"
-    print_line "Est. time left: ${c}${TIME_LEFT}${r}"
+    
+    # Красивый вывод батареи
+    if [[ "$BAT_P" == "N/A" ]]; then
+        print_line "Battery: ${c}No Battery${r}"
+        print_line "Est. time left: ${c}N/A${r}"
+    else
+        print_line "Battery: ${c}${BAT_P}%${r} (${BAT_S})"
+        print_line "Est. time left: ${c}${BAT_T}${r}"
+    fi
+    
     print_line ""
     print_line "${c}I am at your service.${r}"
 
@@ -132,9 +170,9 @@ else
     print_line "${c}Memory:${r}     ${MEM_TOTAL} GB"
 
     # Батарейка
-    IFS='|' read -r BATT_PERCENT _ _ <<< "$(get_battery_info)"
-    if [[ "$BATT_PERCENT" != "N/A" ]]; then
-        print_line "${c}Battery:${r}    ${BATT_PERCENT}%"
+    IFS='|' read -r BAT_P _ _ <<< "$(get_battery_info)"
+    if [[ "$BAT_P" != "N/A" ]]; then
+        print_line "${c}Battery:${r}    ${BAT_P}%"
     fi
 
     print_line ""
