@@ -99,7 +99,8 @@ type_text() {
     local i char
     for ((i=0; i<${#text}; i++)); do
         char="${text:$i:1}"
-        printf "%s" "$char"
+        # ИСПРАВЛЕНО: %b вместо %s для обработки цветов
+        printf "%b" "$char"
         sleep "$delay"
     done
     printf "\n"
