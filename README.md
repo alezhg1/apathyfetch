@@ -1,6 +1,6 @@
 # apathyfetch 
 
-
+---
 
 <img width="1264" height="783" alt="Снимок экрана 2026-03-07 в 19 34 18" src="https://github.com/user-attachments/assets/671d6068-11c1-4bf7-9e78-739f4f20446d" />
 
