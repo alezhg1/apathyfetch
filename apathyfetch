@@ -14,7 +14,7 @@ fi
 IMG_DIR="$SELF_PATH/images"
 MODE="normal"
 ANIMATE=false
-USE_CHAFA=false
+USE_ASCII=false
 TARGET_IMG=""
 
 # Обработка аргументов
@@ -22,7 +22,7 @@ for arg in "$@"; do
     case $arg in
         --hello) MODE="hello" ;;
         --gif) ANIMATE=true ;;
-        --chafa) USE_CHAFA=true ;;
+        --ascii) USE_ASCII=true ;; # Новый флаг вместо --chafa
     esac
 done
 
@@ -37,7 +37,7 @@ if [[ "$ANIMATE" == true ]]; then
         exit 1
     fi
 else
-    # Режим статики: ищем ТОЛЬКО картинки (не gif)
+    # Режим статики: ищем ТОЛЬКО картинки
     FOUND_STATIC=false
     for ext in jpg jpeg png heic webp bmp tiff JPG JPEG PNG HEIC WEBP BMP TIFF; do
         if [[ -f "$IMG_DIR/wall.$ext" ]]; then
@@ -48,17 +48,16 @@ else
     done
 
     if [[ "$FOUND_STATIC" == false ]]; then
-        # Если статики нет, но есть гифка и не просили явно статику - можно попробовать её, но по ТЗ игнорируем
         echo -e "\e[1;31mError:\e[0m No static image found (wall.jpg, wall.png, etc.)."
         exit 1
     fi
 fi
 
-# --- ПРОВЕРКА CHAFA ---
-if [[ "$USE_CHAFA" == true ]]; then
-    if ! command -v chafa &> /dev/null; then
-        echo -e "\e[1;31mError:\e[0m Flag --chafa used, but 'chafa' is not installed."
-        echo "Install it via Homebrew: brew install chafa"
+# --- ПРОВЕРКА JP2A ---
+if [[ "$USE_ASCII" == true ]]; then
+    if ! command -v jp2a &> /dev/null; then
+        echo -e "\e[1;31mError:\e[0m Flag --ascii used, but 'jp2a' is not installed."
+        echo "Install it via Homebrew: brew install jp2a"
         exit 1
     fi
 fi
@@ -67,71 +66,48 @@ fi
 printf "\033[H\033[2J\033[3J"
 
 # --- НАСТРОЙКИ ---
-# Для Chafa ширина задается в символах, для Kitty - тоже примерно в символах
-IMG_WIDTH=40
+IMG_WIDTH=40 # Ширина в символах для jp2a или колонках для kitty
 GAP=4
 TEXT_COL=$((IMG_WIDTH + GAP))
-BOTTOM_GAP=5 # Чуть больше отступ для Chafa, так как символы выше
+# Высота примерная: для ascii зависит от аспекта, возьмем с запасом
+ASCII_HEIGHT_EST=25 
+KITTY_HEIGHT=18
+BOTTOM_GAP=3
 
 # --- ОТРИСОВКА ИЗОБРАЖЕНИЯ ---
 
-if [[ "$USE_CHAFA" == true ]]; then
-    # РЕЖИМ CHAFA
-    # Выводим изображение прямо в поток. Chafa сам обработает GIF (анимация) или картинку.
-    # --size ограничивает ширину/высоту в символах.
-    # --format symbols дает наилучшее качество.
+if [[ "$USE_ASCII" == true ]]; then
+    # РЕЖIM ASCII (jp2a)
+    # jp2a не умеет анимировать гифки сам по себе (только первый кадр), 
+    # поэтому если переданы --ascii --gif, мы просто покажем первый кадр гифки в ASCII.
     
-    # Печатаем Chafa вывод. 
-    # Важно: Chafa выводит сразу много строк. Нам нужно убедиться, что курсор потом встанет правильно.
-    chafa "$TARGET_IMG" --size ${IMG_WIDTH}x --format symbols --align left
+    # Конвертируем PNG в JPEG на лету, если нужно (jp2a любит jpg), но современные версии едят и png.
+    # Используем --colors для цветного вывода.
     
-    # После вывода Chafa курсор находится под картинкой.
-    # Нам нужно поднять его вверх на высоту картинки и сдвинуть вправо?
-    # Нет, Chafa выводит картинку сверху вниз. Текст должен быть справа.
-    # Но Chafa выводит поток строк. Мы не можем легко "вклиниться" справа в поток.
-    # Решение для Chafa: 
-    # 1. Сохранить вывод chafa во временную переменную? (Тяжело для GIF).
-    # 2. Хак: Вывести картинку, потом вернуть курсор в начало (1,1), сдвинуть вправо и печатать текст поверх?
-    #    Проблема: если текст длиннее картинки, он затрет нижнюю часть.
-    #    Решение: Печатать текст ПОСЛЕ картинки, но со сдвигом? Нет, тогда будет столбиком.
+    # Выводим ASCII-арт. 
+    # --width задает ширину в символах.
+    # --height можно не задавать, пусть считает сам, или задать пропорционально.
+    # --background=dark предполагает темную тему (как ты любишь).
     
-    # Правильный подход для Chafa в одном потоке:
-    # Мы не можем делать параллельные колонки легко в shell без ncurses, если выводим поток.
-    # НО! Мы можем использовать трюк:
-    # 1. Узнать высоту вывода Chafa (сложно заранее).
-    # 2. Или просто вывести картинку, затем перевести курсор ВВЕРХ на нужное количество строк и вправо.
+    jp2a "$TARGET_IMG" --width=$IMG_WIDTH --colors --background=dark --fill
     
-    # Попробуем такой вариант:
-    # Выводим картинку. Считаем, что она займет ~IMG_ROWS строк (зависит от аспекта).
-    # Для простоты в режиме Chafa мы сделаем вывод: Картинка, потом под ней Текст?
-    # Нет, пользователь хочет "как раньше", т.е. справа.
-    
-    # Реализация "Справа" для Chafa сложна в чистом bash/zsh без буферизации всего экрана.
-    # Компромисс: В режиме --chafa мы выводим картинку, затем переводим курсор в начало (1,1), 
-    # сдвигаем вправо на IMG_WIDTH+GAP и печатаем текст.
-    # Но если текст длиннее картинки, он пойдет ниже картинки по правой колонке. Это ок.
-    # Главное - поднять курсор обратно вверх перед печатью текста.
-    
-    # Сколько строк заняла картинка? Chafa не говорит. 
-    # Приблизительно: высота картинки / высота символа. 
-    # Допустим, картинка 40 символов шириной. При 16:9 высота будет ~22 строки.
-    # Давайте возьмем с запасом 30 строк.
-    
-    ESTIMATED_IMG_ROWS=30
-    
-    # Возвращаем курсор в верхний левый угол
+    # После вывода курсор под картинкой.
+    # Поднимаем курсор в начало (строка 1, колонка 1) и сдвигаем вправо для текста.
     printf "\e[1;1H"
-    # Сдвигаем вправо
     printf "\e[${TEXT_COL}G"
     
+    CURRENT_HEIGHT=$ASCII_HEIGHT_EST
+
 else
-    # РЕЖИМ KITTY (Стандартный)
+    # РЕЖИМ KITTY (Нативная графика)
     kitten icat --clear
-    kitten icat --place "${IMG_WIDTH}x18@0x0" --align left "$TARGET_IMG"
+    kitten icat --place "${IMG_WIDTH}x${KITTY_HEIGHT}@0x0" --align left "$TARGET_IMG"
     
-    # Возвращаем курсор в верхний левый угол для печати текста справа
+    # Возвращаем курсор для текста справа
     printf "\e[1;1H"
     printf "\e[${TEXT_COL}G"
+    
+    CURRENT_HEIGHT=$KITTY_HEIGHT
 fi
 
 # Цвета
@@ -248,12 +224,6 @@ else
 fi
 
 # --- ФИНАЛЬНЫЙ ОТСТУП СНIZУ ---
-# Для Chafa высота может быть больше, берем с запасом
-if [[ "$USE_CHAFA" == true ]]; then
-    FINAL_ROW=$((ESTIMATED_IMG_ROWS + BOTTOM_GAP))
-else
-    FINAL_ROW=$((18 + BOTTOM_GAP)) # 18 - высота для Kitty
-fi
-
+FINAL_ROW=$((CURRENT_HEIGHT + BOTTOM_GAP))
 printf "\e[${FINAL_ROW};1H"
 printf "${r}\e[0m"
