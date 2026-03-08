@@ -15,7 +15,6 @@ IMG_DIR="$SELF_PATH/images"
 MODE="normal"
 ANIMATE=false
 TARGET_IMG=""
-TEMP_STATIC_IMG=""
 
 # Обработка аргументов
 for arg in "$@"; do
@@ -25,57 +24,34 @@ for arg in "$@"; do
     esac
 done
 
-# --- ЛОГИКА ПОИСКА ФАЙЛОВ ---
+# --- ЛОГИКА ВЫБОРА ФАЙЛА ---
 
-# 1. Ищем обычное фото (wall с любым расширением, кроме .gif)
-# Поддерживаем: .jpg, .jpeg, .png, .webp, .heic, .bmp, .tiff
-FOUND_STATIC=false
-for ext in jpg jpeg png webp heic bmp tiff JPG JPEG PNG WEBP HEIC BMP TIFF; do
-    if [[ -f "$IMG_DIR/wall.$ext" ]]; then
-        TARGET_IMG="$IMG_DIR/wall.$ext"
-        FOUND_STATIC=true
-        break
-    fi
-done
-
-# 2. Ищем гифку (строго wall.gif)
-FOUND_GIF=false
-if [[ -f "$IMG_DIR/wall.gif" ]]; then
-    FOUND_GIF=true
-fi
-
-# 3. Принятие решения что показывать
 if [[ "$ANIMATE" == true ]]; then
-    # Режим анимации
-    if [[ "$FOUND_GIF" == true ]]; then
+    # РЕЖИМ АНИМАЦИИ: ищем ТОЛЬКО .gif
+    if [[ -f "$IMG_DIR/wall.gif" ]]; then
         TARGET_IMG="$IMG_DIR/wall.gif"
     else
         echo -e "\e[1;31mError:\e[0m Flag --gif used, but 'images/wall.gif' not found."
-        echo "Please add a GIF named 'wall.gif' to the images folder."
-        # Если хотели гифку, но её нет, пробуем показать статику если есть
-        if [[ "$FOUND_STATIC" == true ]]; then
-            echo "Falling back to static image: $TARGET_IMG"
-        else
-            exit 1
-        fi
+        echo "Please ensure a file named 'wall.gif' exists in the images folder."
+        exit 1
     fi
 else
-    # Режим статики (по умолчанию)
-    if [[ "$FOUND_STATIC" == true ]]; then
-        # Используем найденное фото
-        TARGET_IMG="$TARGET_IMG"
-    elif [[ "$FOUND_GIF" == true ]]; then
-        # Фото нет, но есть гифка. 
-        # Если не просили анимацию, мы все равно покажем гифку (kitten покажет 1 кадр или зациклит, зависит от версии),
-        # НО по заданию: "гифку только гифкой". 
-        # Значит, если нет обычного фото и нет флага --gif, мы не должны показывать гифку как фото?
-        # Обычно пользователь хочет видеть хоть что-то. Давайте покажем гифку, kitten часто сам справляется.
-        # Или лучше вывести ошибку? Давайте выведем гифку, так надежнее для UX.
-        TARGET_IMG="$IMG_DIR/wall.gif"
-        echo -e "\e[1;33mWarning:\e[0m No static 'wall.*' image found. Using 'wall.gif' without animation flag."
-    else
-        echo -e "\e[1;31mError:\e[0m No image found in '$IMG_DIR'."
-        echo "Expected: 'wall.jpg', 'wall.png', etc. OR 'wall.gif' with --gif flag."
+    # РЕЖИМ СТАТИКИ (по умолчанию): ищем ТОЛЬКО картинки (не gif)
+    FOUND_STATIC=false
+    
+    # Список поддерживаемых расширений для статики
+    for ext in jpg jpeg png heic webp bmp tiff JPG JPEG PNG HEIC WEBP BMP TIFF; do
+        if [[ -f "$IMG_DIR/wall.$ext" ]]; then
+            TARGET_IMG="$IMG_DIR/wall.$ext"
+            FOUND_STATIC=true
+            break
+        fi
+    done
+
+    if [[ "$FOUND_STATIC" == false ]]; then
+        echo -e "\e[1;31mError:\e[0m No static image found."
+        echo "Expected a file like 'wall.jpg', 'wall.png', etc. in '$IMG_DIR'."
+        echo "Note: 'wall.gif' is ignored unless you use the --gif flag."
         exit 1
     fi
 fi
@@ -213,10 +189,5 @@ fi
 # --- ФИНАЛЬНЫЙ ОТСТУП СНIZУ ---
 FINAL_ROW=$((IMG_ROWS + BOTTOM_GAP))
 printf "\e[${FINAL_ROW};1H"
-
-# Очистка временного файла если был создан (в данной версии не используется, но на будущее)
-if [[ -n "$TEMP_STATIC_IMG" ]] && [[ -f "$TEMP_STATIC_IMG" ]]; then
-    rm -f "$TEMP_STATIC_IMG"
-fi
 
 printf "${r}\e[0m"
