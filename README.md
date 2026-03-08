@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/alezhg1/apathyfetch/master/install.
 По умолчанию скрипт ищет файл `wall.gif` или `wall.jpeg` в папке `~/.local/share/apathyfetch/images/`. Вы можете заменить этот файл на любой свой, сохранив имя и расширение, чтобы изменить фон.
 
 ---
-Made With Love macOS community. 🖤
+Made With Love for macOS community. 🖤
 
 ---
 <img width="1264" height="783" alt="Снимок экрана 2026-03-07 в 19 34 18" src="https://github.com/user-attachments/assets/671d6068-11c1-4bf7-9e78-739f4f20446d" />
